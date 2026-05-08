@@ -29,9 +29,9 @@ USDA_DATASETS = {
 # then paste the download URLs here. Until populated, the app falls back
 # to downloading the full ZIP from USDA.
 SLIM_DATA_URLS: dict = {
-    # "2026-04": "https://github.com/fishslayer1941/avena_sativa/releases/download/v1.0/2026-04_branded_food.parquet",
-    # "2025-04": "https://github.com/fishslayer1941/avena_sativa/releases/download/v1.0/2025-04_branded_food.parquet",
-    # "2024-04": "https://github.com/fishslayer1941/avena_sativa/releases/download/v1.0/2024-04_branded_food.parquet",
+     "2026-04": "https://github.com/fishslayer1941/avena_sativa/releases/download/data/2026-04_branded_food.parquet",
+     "2025-04": "https://github.com/fishslayer1941/avena_sativa/releases/download/data/2025-04_branded_food.parquet",
+     "2024-04": "https://github.com/fishslayer1941/avena_sativa/releases/download/data/2024-04_branded_food.parquet",
 }
 
 # Canonical column names from the USDA branded_food CSV (snake_case).
