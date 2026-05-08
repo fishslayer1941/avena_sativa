@@ -20,8 +20,18 @@ from datetime import datetime
 # ─────────────────────────────────────────────
 USDA_DATASETS = {
     "2026-04": "https://fdc.nal.usda.gov/fdc-datasets/FoodData_Central_branded_food_csv_2026-04-30.zip",
-       "2025-04": "https://fdc.nal.usda.gov/fdc-datasets/FoodData_Central_branded_food_csv_2025-04-24.zip",
+    "2025-04": "https://fdc.nal.usda.gov/fdc-datasets/FoodData_Central_branded_food_csv_2025-04-24.zip",
     "2024-04": "https://fdc.nal.usda.gov/fdc-datasets/FoodData_Central_branded_food_csv_2024-04-18.zip",
+}
+
+# GitHub Release URLs for slim Parquet files (8-column, deduped).
+# Run prepare_data.py locally, upload the output to GitHub Releases,
+# then paste the download URLs here. Until populated, the app falls back
+# to downloading the full ZIP from USDA.
+SLIM_DATA_URLS: dict = {
+    # "2026-04": "https://github.com/fishslayer1941/avena_sativa/releases/download/v1.0/2026-04_branded_food.parquet",
+    # "2025-04": "https://github.com/fishslayer1941/avena_sativa/releases/download/v1.0/2025-04_branded_food.parquet",
+    # "2024-04": "https://github.com/fishslayer1941/avena_sativa/releases/download/v1.0/2024-04_branded_food.parquet",
 }
 
 # Canonical column names from the USDA branded_food CSV (snake_case).
@@ -37,7 +47,7 @@ USDA_COLS = {
     "category":  "branded_food_category",
 }
 
-BASE_DATA_FOLDER = "data"   # Local cache folder for downloaded ZIPs and CSVs
+BASE_DATA_FOLDER = os.environ.get("DATA_FOLDER", "data")
 
 _DOWNLOAD_HEADERS = {
     "User-Agent": (
@@ -114,6 +124,35 @@ def find_branded_csv(folder: str) -> str:
     )
 
 
+def download_slim_data(release_key: str, base_folder: str = BASE_DATA_FOLDER) -> str:
+    """
+    Downloads the slim Parquet file for a release from GitHub Releases (if not cached).
+    Returns the local path to the .parquet file.
+    """
+    os.makedirs(base_folder, exist_ok=True)
+    parquet_path = os.path.join(base_folder, f"{release_key}_branded_food.parquet")
+
+    if os.path.exists(parquet_path):
+        print(f"  📦 Using cached Parquet: {parquet_path}")
+        return parquet_path
+
+    if release_key not in SLIM_DATA_URLS:
+        raise KeyError(
+            f"No slim data URL configured for '{release_key}'. "
+            "Run prepare_data.py, upload to GitHub Releases, then add the URL to SLIM_DATA_URLS."
+        )
+
+    url = SLIM_DATA_URLS[release_key]
+    print(f"  ⬇  Downloading slim dataset: {release_key}...")
+    with requests.get(url, stream=True, headers=_DOWNLOAD_HEADERS, timeout=300) as r:
+        r.raise_for_status()
+        with open(parquet_path, "wb") as f:
+            for chunk in r.iter_content(chunk_size=65536):
+                f.write(chunk)
+    print(f"  ✅ Slim dataset cached: {parquet_path}")
+    return parquet_path
+
+
 # ─────────────────────────────────────────────
 # DATAFRAME LOADING
 # ─────────────────────────────────────────────
@@ -137,23 +176,29 @@ def load_branded_food(release_key: str, base_folder: str = BASE_DATA_FOLDER) -> 
         )
 
     print(f"\n📥 Loading USDA dataset: {release_key}")
-    url = USDA_DATASETS[release_key]
-    extracted = download_and_extract(url, base_folder)
-    csv_path = find_branded_csv(extracted)
+    parquet_path = os.path.join(base_folder, f"{release_key}_branded_food.parquet")
 
-    print(f"  📄 Reading CSV: {csv_path}")
-    df = pd.read_csv(csv_path, dtype=str, low_memory=False)
+    if os.path.exists(parquet_path) or release_key in SLIM_DATA_URLS:
+        # Fast path: slim Parquet (local cache or GitHub Releases download)
+        path = download_slim_data(release_key, base_folder)
+        print(f"  📄 Reading Parquet: {path}")
+        df = pd.read_parquet(path)
+    else:
+        # Fallback: full ZIP from USDA (used locally before prepare_data.py has been run)
+        url = USDA_DATASETS[release_key]
+        extracted = download_and_extract(url, base_folder)
+        csv_path = find_branded_csv(extracted)
+        print(f"  📄 Reading CSV: {csv_path}")
+        df = pd.read_csv(csv_path, dtype=str, low_memory=False)
 
-    # Validate expected columns exist
-    missing = [v for v in USDA_COLS.values() if v not in df.columns]
-    if missing:
-        print(f"  ⚠  Missing expected columns: {missing}")
-        print(f"  ℹ  Columns found: {df.columns.tolist()}")
+        missing = [v for v in USDA_COLS.values() if v not in df.columns]
+        if missing:
+            print(f"  ⚠  Missing expected columns: {missing}")
+            print(f"  ℹ  Columns found: {df.columns.tolist()}")
 
-    # Deduplicate on UPC
-    before = len(df)
-    df = df.drop_duplicates(subset=USDA_COLS["upc"])
-    print(f"  🔢 Rows: {before:,} → {len(df):,} after deduplication on gtin_upc")
+        before = len(df)
+        df = df.drop_duplicates(subset=USDA_COLS["upc"])
+        print(f"  🔢 Rows: {before:,} → {len(df):,} after deduplication on gtin_upc")
 
     # Normalize ingredients to lowercase for consistent matching
     if USDA_COLS["ingred"] in df.columns:
